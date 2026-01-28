@@ -1,0 +1,88 @@
+version: "3.9"
+
+services:
+  # API Server - Main hypervisor management service
+  api-server:
+    container_name: arm-hypervisor-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - "linux/amd64"
+        - "linux/arm64"
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    environment:
+      - LOG_LEVEL=info
+      - JWT_SECRET=your-secret-key-change-this
+      - RUST_LOG=api_server=info,actix_web=info
+    volumes:
+      # LXC storage and configuration
+      - lxc_data:/var/lib/lxc
+      - hypervisor_data:/var/lib/hypervisor
+      - hypervisor_logs:/var/log/arm-hypervisor
+      # Configuration file (optional - comment out to use defaults)
+      - ./config.toml.example:/etc/arm-hypervisor/config.toml:ro
+    networks:
+      - hypervisor_net
+    # Required for LXC container operations
+    privileged: true
+    # Alternative to privileged: use capabilities (more secure)
+    # cap_add:
+    #   - SYS_ADMIN
+    #   - NET_ADMIN
+    #   - IPC_LOCK
+    #   - SYS_PTRACE
+    # security_opt:
+    #   - apparmor=unconfined
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Test Node - Optional cluster node for testing
+  test-node:
+    container_name: arm-hypervisor-node-1
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - "linux/amd64"
+        - "linux/arm64"
+    environment:
+      - LOG_LEVEL=info
+      - RUST_LOG=api_server=info,actix_web=info
+      - NODE_NAME=node-1
+      - CLUSTER_SERVER=api-server:8080
+    volumes:
+      - lxc_data_node1:/var/lib/lxc
+      - hypervisor_data_node1:/var/lib/hypervisor
+    networks:
+      - hypervisor_net
+    privileged: true
+    restart: unless-stopped
+    profiles:
+      - cluster
+    depends_on:
+      api-server:
+        condition: service_healthy
+
+networks:
+  hypervisor_net:
+    driver: bridge
+
+volumes:
+  lxc_data:
+    driver: local
+  hypervisor_data:
+    driver: local
+  hypervisor_logs:
+    driver: local
+  lxc_data_node1:
+    driver: local
+  hypervisor_data_node1:
+    driver: local

@@ -1,0 +1,86 @@
+# VM Testing Configuration
+# Use this configuration when running the API server in a virtual machine
+# Copy to /etc/arm-hypervisor/config.toml or use as config.toml in project root
+
+[server]
+# Bind to all interfaces for VM testing
+host = "0.0.0.0"
+port = 8080
+
+# For TLS testing (optional):
+# port = 8443
+# [server.tls]
+# cert_file = "/etc/arm-hypervisor/certs/server.crt"
+# key_file = "/etc/arm-hypervisor/certs/server.key"
+
+# Server connection settings
+worker_threads = 4
+keep_alive = 75
+max_connections = 1000
+
+[logging]
+# Set to 'debug' for verbose logging during testing
+level = "info"
+format = "text"  # Use "json" for structured logging in production
+
+[security]
+# Disable auth for testing (enable JWT validation)
+auth_enabled = false
+# For production, generate a strong JWT secret:
+# jwt_secret = "your-strong-random-secret-here"
+
+[storage]
+# Storage backend configuration
+default_path = "/var/lib/hypervisor/storage"
+# default_backend = "local"
+
+[container]
+# LXC container paths
+lxc_path = "/var/lib/lxc"
+# Path to LXC templates
+lxc_template_path = "/usr/share/lxc/templates"
+# Default template for new containers
+default_template = "alpine"
+
+# Container limits (defaults if not specified in requests)
+[container.defaults]
+cpu_limit = 2
+memory_limit = 1073741824  # 1GB in bytes
+disk_limit = 10737418240   # 10GB in bytes
+
+[network]
+# Network configuration for containers
+default_bridge = "lxcbr0"
+dns_servers = ["8.8.8.8", "8.8.4.4"]
+
+# Bridge configuration
+[network.bridges.lxcbr0]
+ip_address = "10.0.3.1/24"
+stp_enabled = false
+forward_delay = 0
+
+[cluster]
+# Cluster configuration (optional for single-node testing)
+enabled = false
+# cluster_name = "hypervisor-cluster-1"
+# node_id = "node-1"
+# node_address = "127.0.0.1:8080"
+
+# For cluster mode:
+# [cluster.discovery]
+# method = "static"  # or "dns", "consul"
+# peers = ["node-2:8080", "node-3:8080"]
+
+[monitoring]
+# Monitoring and metrics
+metrics_enabled = true
+# prometheus_push_gateway = "http://prometheus:9091"
+
+[features]
+# Feature flags for testing
+enable_debug_endpoints = true
+allow_privileged_containers = true
+enable_live_migration = false  # May require additional kernel modules
+
+# Test-specific settings
+test_mode = false  # Set to true for integration testing without LXC

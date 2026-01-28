@@ -1,0 +1,58 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# IDE and Editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+
+# Build artifacts
+target/
+dist/
+build/
+*.o
+*.a
+*.so
+
+# Dependencies
+Cargo.lock
+
+# Documentation
+docs/
+*.md
+README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile
+
+# Temporary files
+*.tmp
+*.log
+.cache
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Test files
+tests/
+examples/
+
+# Development files
+.vscode-settings.json
+launch.json
