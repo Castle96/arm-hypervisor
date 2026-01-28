@@ -1,10 +1,11 @@
 use actix_web::{web, HttpResponse, Responder};
+use serde::Deserialize;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use ::network::{BridgeManager, NetworkError};
 use ::storage::{LocalStorageManager, SharedStorageManager, StorageError};
-use container_manager::{ContainerError, ContainerManager};
+use container_manager::{ContainerError, ContainerManager, SnapshotManager};
 use models::*;
 
 pub async fn list_containers() -> impl Responder {
@@ -263,6 +264,175 @@ pub async fn create_bridge(req: web::Json<CreateBridgeRequest>) -> impl Responde
             error!("Failed to create bridge: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("{}", e)
+            }))
+        }
+    }
+}
+
+// ============================================================================
+// Container Snapshot Handlers
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct CreateSnapshotRequest {
+    pub name: Option<String>,
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RestoreSnapshotRequest {
+    pub snapshot_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CloneFromSnapshotRequest {
+    pub snapshot_name: String,
+    pub new_container_name: String,
+}
+
+/// List all snapshots for a container
+pub async fn list_snapshots(path: web::Path<String>) -> impl Responder {
+    let container_name = path.into_inner();
+    info!("Listing snapshots for container: {}", container_name);
+
+    match SnapshotManager::list(&container_name).await {
+        Ok(snapshots) => HttpResponse::Ok().json(serde_json::json!({
+            "container": container_name,
+            "snapshots": snapshots
+        })),
+        Err(ContainerError::NotFound(name)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("Container not found: {}", name)
+            }))
+        }
+        Err(e) => {
+            error!("Failed to list snapshots: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+/// Create a snapshot of a container
+pub async fn create_snapshot(
+    path: web::Path<String>,
+    req: web::Json<CreateSnapshotRequest>,
+) -> impl Responder {
+    let container_name = path.into_inner();
+    info!("Creating snapshot for container: {}", container_name);
+
+    match SnapshotManager::create(&container_name, req.name.clone(), req.comment.clone()).await {
+        Ok(snapshot) => HttpResponse::Created().json(serde_json::json!({
+            "message": "Snapshot created successfully",
+            "snapshot": snapshot
+        })),
+        Err(ContainerError::NotFound(name)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("Container not found: {}", name)
+            }))
+        }
+        Err(e) => {
+            error!("Failed to create snapshot: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+/// Restore a container from a snapshot
+pub async fn restore_snapshot(
+    path: web::Path<String>,
+    req: web::Json<RestoreSnapshotRequest>,
+) -> impl Responder {
+    let container_name = path.into_inner();
+    info!(
+        "Restoring container '{}' from snapshot '{}'",
+        container_name, req.snapshot_name
+    );
+
+    match SnapshotManager::restore(&container_name, &req.snapshot_name).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "message": format!(
+                "Container '{}' restored from snapshot '{}'",
+                container_name, req.snapshot_name
+            )
+        })),
+        Err(ContainerError::NotFound(name)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("Container not found: {}", name)
+            }))
+        }
+        Err(e) => {
+            error!("Failed to restore snapshot: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+/// Delete a snapshot
+pub async fn delete_snapshot(path: web::Path<(String, String)>) -> impl Responder {
+    let (container_name, snapshot_name) = path.into_inner();
+    info!(
+        "Deleting snapshot '{}' for container '{}'",
+        snapshot_name, container_name
+    );
+
+    match SnapshotManager::delete(&container_name, &snapshot_name).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "message": format!("Snapshot '{}' deleted", snapshot_name)
+        })),
+        Err(ContainerError::NotFound(name)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("Container not found: {}", name)
+            }))
+        }
+        Err(e) => {
+            error!("Failed to delete snapshot: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": e.to_string()
+            }))
+        }
+    }
+}
+
+/// Clone a container from a snapshot
+pub async fn clone_from_snapshot(
+    path: web::Path<String>,
+    req: web::Json<CloneFromSnapshotRequest>,
+) -> impl Responder {
+    let container_name = path.into_inner();
+    info!(
+        "Cloning container '{}' from snapshot '{}' to '{}'",
+        container_name, req.snapshot_name, req.new_container_name
+    );
+
+    match SnapshotManager::clone(&container_name, &req.snapshot_name, &req.new_container_name)
+        .await
+    {
+        Ok(_) => HttpResponse::Created().json(serde_json::json!({
+            "message": format!(
+                "Container '{}' cloned from snapshot '{}' to '{}'",
+                container_name, req.snapshot_name, req.new_container_name
+            )
+        })),
+        Err(ContainerError::NotFound(name)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("Container not found: {}", name)
+            }))
+        }
+        Err(ContainerError::AlreadyExists(name)) => {
+            HttpResponse::Conflict().json(serde_json::json!({
+                "error": format!("Container already exists: {}", name)
+            }))
+        }
+        Err(e) => {
+            error!("Failed to clone from snapshot: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": e.to_string()
             }))
         }
     }
