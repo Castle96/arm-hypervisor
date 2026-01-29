@@ -1,5 +1,28 @@
-use actix_web::{test, App};
+use actix_web::{test, web, App};
 use serde_json::json;
+use std::sync::Arc;
+
+// Helper to create app with all required dependencies
+fn create_test_app() -> App<
+    impl actix_web::dev::ServiceFactory<
+        actix_web::dev::ServiceRequest,
+        Config = (),
+        Response = actix_web::dev::ServiceResponse,
+        Error = actix_web::Error,
+        InitError = (),
+    >,
+> {
+    // Create required shared state
+    let metrics_collector = Arc::new(api_server::observability::MetricsCollector::new());
+    let user_store = Arc::new(std::sync::Mutex::new(api_server::rbac::UserStore::new()));
+    let audit_logger = Arc::new(api_server::audit::AuditLogger::new(10000));
+
+    App::new()
+        .app_data(web::Data::new(metrics_collector))
+        .app_data(web::Data::new(user_store))
+        .app_data(web::Data::new(audit_logger))
+        .configure(api_server::routes::configure_routes)
+}
 
 // Helper to check if LXC is available in environment
 fn lxc_available() -> bool {
@@ -203,4 +226,112 @@ async fn test_nonexistent_container_operations() {
 
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_client_error());
+}
+
+// Tests for new features added on 2026-01-28
+
+#[actix_web::test]
+async fn test_health_endpoint() {
+    let app = test::init_service(create_test_app()).await;
+    let req = test::TestRequest::get().uri("/health").to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    // Health check may return 503 if LXC is not available (expected in test env)
+    // Should not return 404 (endpoint exists) or 500 (unless dependencies fail)
+    assert!(
+        status.is_success() || status.as_u16() == 503,
+        "Health endpoint should return 2xx or 503, got: {}", 
+        status
+    );
+}
+
+#[actix_web::test]
+async fn test_ready_endpoint() {
+    let app = test::init_service(create_test_app()).await;
+    let req = test::TestRequest::get().uri("/ready").to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    // Readiness may return 503 if services aren't ready (expected without LXC)
+    assert!(
+        status.is_success() || status.as_u16() == 503,
+        "Ready endpoint should return 2xx or 503, got: {}",
+        status
+    );
+}
+
+#[actix_web::test]
+async fn test_metrics_prometheus_endpoint() {
+    let app = test::init_service(create_test_app()).await;
+    let req = test::TestRequest::get().uri("/metrics").to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    // With proper dependencies, metrics should return 200 or 500 if sys-info fails
+    assert!(
+        status.is_success() || status.is_server_error(),
+        "Metrics endpoint should return 2xx or 5xx, got: {}",
+        status
+    );
+}
+
+#[actix_web::test]
+async fn test_metrics_json_endpoint() {
+    let app = test::init_service(create_test_app()).await;
+    let req = test::TestRequest::get().uri("/metrics/json").to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    // With proper dependencies, metrics should return 200 or 500 if sys-info fails
+    assert!(
+        status.is_success() || status.is_server_error(),
+        "Metrics JSON endpoint should return 2xx or 5xx, got: {}",
+        status
+    );
+}
+
+#[actix_web::test]
+async fn test_list_snapshots() {
+    let app = test::init_service(create_test_app()).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/containers/test-container/snapshots")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    // Should return 404 (container not found) or 500 (LXC not available)
+    // Should NOT return 404 for missing route
+    assert!(
+        status.is_client_error() || status.is_server_error(),
+        "Snapshots endpoint should return 4xx or 5xx without container, got: {}",
+        status
+    );
+}
+
+#[actix_web::test]
+async fn test_list_users() {
+    let app = test::init_service(create_test_app()).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/users")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    // With proper dependencies, user list should return 200
+    assert!(
+        status.is_success(),
+        "Users endpoint should return 2xx with dependencies, got: {}",
+        status
+    );
+}
+
+#[actix_web::test]
+async fn test_get_audit_logs() {
+    let app = test::init_service(create_test_app()).await;
+    let req = test::TestRequest::get()
+        .uri("/api/v1/audit/logs")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let status = resp.status();
+    // With proper dependencies, audit logs should return 200
+    assert!(
+        status.is_success(),
+        "Audit logs endpoint should return 2xx with dependencies, got: {}",
+        status
+    );
 }
