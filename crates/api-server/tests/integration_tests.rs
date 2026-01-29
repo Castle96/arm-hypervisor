@@ -212,11 +212,14 @@ async fn test_health_endpoint() {
     let app = test::init_service(App::new().configure(api_server::routes::configure_routes)).await;
     let req = test::TestRequest::get().uri("/health").to_request();
     let resp = test::call_service(&app, req).await;
-    // Health check may return 503 if LXC is not available (expected in test env)
-    // But the endpoint should respond (not 404 or 500)
     let status = resp.status();
-    assert!(status.as_u16() >= 200 && status.as_u16() < 600, 
-            "Health endpoint should respond, got: {}", status);
+    // Health check may return 503 if LXC is not available (expected in test env)
+    // Should not return 404 (endpoint exists) or 500 (unless dependencies fail)
+    assert!(
+        status.is_success() || status.as_u16() == 503,
+        "Health endpoint should return 2xx or 503, got: {}", 
+        status
+    );
 }
 
 #[actix_web::test]
@@ -224,10 +227,13 @@ async fn test_ready_endpoint() {
     let app = test::init_service(App::new().configure(api_server::routes::configure_routes)).await;
     let req = test::TestRequest::get().uri("/ready").to_request();
     let resp = test::call_service(&app, req).await;
-    // Readiness may return 503 if services aren't ready (expected without LXC)
     let status = resp.status();
-    assert!(status.as_u16() >= 200 && status.as_u16() < 600,
-            "Ready endpoint should respond, got: {}", status);
+    // Readiness may return 503 if services aren't ready (expected without LXC)
+    assert!(
+        status.is_success() || status.as_u16() == 503,
+        "Ready endpoint should return 2xx or 503, got: {}",
+        status
+    );
 }
 
 #[actix_web::test]
@@ -235,11 +241,13 @@ async fn test_metrics_prometheus_endpoint() {
     let app = test::init_service(App::new().configure(api_server::routes::configure_routes)).await;
     let req = test::TestRequest::get().uri("/metrics").to_request();
     let resp = test::call_service(&app, req).await;
-    // Metrics endpoint needs system access which may fail in test env
-    // Allow any response including 500 for missing system info
     let status = resp.status();
-    assert!(status.as_u16() >= 200 && status.as_u16() < 600,
-            "Metrics endpoint should respond, got: {}", status);
+    // Metrics endpoint may fail with 500 if system info unavailable in test env
+    assert!(
+        status.is_success() || status.is_server_error(),
+        "Metrics endpoint should return 2xx or 5xx, got: {}",
+        status
+    );
 }
 
 #[actix_web::test]
@@ -247,10 +255,13 @@ async fn test_metrics_json_endpoint() {
     let app = test::init_service(App::new().configure(api_server::routes::configure_routes)).await;
     let req = test::TestRequest::get().uri("/metrics/json").to_request();
     let resp = test::call_service(&app, req).await;
-    // Metrics endpoint needs system access which may fail in test env
     let status = resp.status();
-    assert!(status.as_u16() >= 200 && status.as_u16() < 600,
-            "Metrics JSON endpoint should respond, got: {}", status);
+    // Metrics endpoint may fail with 500 if system info unavailable in test env
+    assert!(
+        status.is_success() || status.is_server_error(),
+        "Metrics JSON endpoint should return 2xx or 5xx, got: {}",
+        status
+    );
 }
 
 #[actix_web::test]
@@ -260,8 +271,14 @@ async fn test_list_snapshots() {
         .uri("/api/v1/containers/test-container/snapshots")
         .to_request();
     let resp = test::call_service(&app, req).await;
-    // Should fail gracefully if container doesn't exist or LXC not available
-    assert!(resp.status().as_u16() >= 200, "Got invalid status: {}", resp.status());
+    let status = resp.status();
+    // Should return 404 (container not found) or 500 (LXC not available)
+    // Should NOT return 404 for missing route
+    assert!(
+        status.is_client_error() || status.is_server_error(),
+        "Snapshots endpoint should return 4xx or 5xx without container, got: {}",
+        status
+    );
 }
 
 #[actix_web::test]
@@ -271,8 +288,13 @@ async fn test_list_users() {
         .uri("/api/v1/users")
         .to_request();
     let resp = test::call_service(&app, req).await;
-    // User list should work even without auth middleware fully implemented
-    assert!(resp.status().as_u16() >= 200, "Got invalid status: {}", resp.status());
+    let status = resp.status();
+    // User list should work and return success or server error
+    assert!(
+        status.is_success() || status.is_server_error(),
+        "Users endpoint should return 2xx or 5xx, got: {}",
+        status
+    );
 }
 
 #[actix_web::test]
@@ -282,6 +304,11 @@ async fn test_get_audit_logs() {
         .uri("/api/v1/audit/logs")
         .to_request();
     let resp = test::call_service(&app, req).await;
-    // Audit logs should be accessible
-    assert!(resp.status().as_u16() >= 200, "Got invalid status: {}", resp.status());
+    let status = resp.status();
+    // Audit logs should be accessible and return success or server error
+    assert!(
+        status.is_success() || status.is_server_error(),
+        "Audit logs endpoint should return 2xx or 5xx, got: {}",
+        status
+    );
 }
